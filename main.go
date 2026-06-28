@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -16,7 +17,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const dbURL = "postgres://admin:secret@localhost:5433/onodi_library"
+func getDBURL() string {
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		return url
+	}
+	return "postgres://admin:secret@localhost:5433/onodi_library"
+}
 
 type Book struct {
 	ID             string  `json:"id"`
@@ -305,7 +311,7 @@ func fetchSeriesFromOpenLibrary(title, author string) ([]SeriesBook, error) {
 }
 
 func main() {
-	conn, err := pgxpool.New(context.Background(), dbURL)
+	conn, err := pgxpool.New(context.Background(), getDBURL())
 	if err != nil {
 		log.Fatalf("Échec connexion PostgreSQL: %v\n", err)
 	}
