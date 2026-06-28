@@ -1,6 +1,6 @@
 module onodi_api
 
-go 1.26.1
+go 1.23
 
 require (
 	github.com/bytedance/gopkg v0.1.4 // indirect
