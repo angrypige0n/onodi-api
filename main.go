@@ -604,9 +604,9 @@ func main() {
 			SELECT m.month,
 			       COALESCE(COUNT(b.id), 0) as count,
 			       COALESCE(SUM(b.total_pages), 0) as pages,
-			       ARRAY_REMOVE(ARRAY_AGG(b.cover_url ORDER BY b.updated_at DESC), NULL) as covers
+			       ARRAY_REMOVE(ARRAY_AGG(b.cover_url ORDER BY b.date_read DESC), NULL) as covers
 			FROM months m
-			LEFT JOIN books b ON TO_CHAR(b.updated_at, 'YYYY-MM') = m.month AND b.status='read'
+			LEFT JOIN books b ON TO_CHAR(b.date_read, 'YYYY-MM') = m.month AND b.status='read'
 			GROUP BY m.month ORDER BY m.month ASC`)
 		defer monthRows.Close()
 		var monthStats []MonthStatWithCovers
@@ -687,11 +687,11 @@ func main() {
 			Scan(&totalRead, &totalPages)
 		conn.QueryRow(context.Background(),
 			`SELECT COUNT(*), COALESCE(SUM(total_pages),0) FROM books
-			 WHERE status='read' AND DATE_TRUNC('month', updated_at) = DATE_TRUNC('month', NOW())`).
+			 WHERE status='read' AND DATE_TRUNC('month', date_read) = DATE_TRUNC('month', NOW())`).
 			Scan(&thisMonthBooks, &thisMonthPages)
 		conn.QueryRow(context.Background(),
 			`SELECT COUNT(*) FROM books
-			 WHERE status='read' AND DATE_TRUNC('year', updated_at) = DATE_TRUNC('year', NOW())`).
+			 WHERE status='read' AND DATE_TRUNC('year', date_read) = DATE_TRUNC('year', NOW())`).
 			Scan(&thisYearBooks)
 
 		c.JSON(http.StatusOK, gin.H{
