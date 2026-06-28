@@ -401,7 +401,8 @@ func main() {
 			        CAST(date_read AS TEXT) as date_read
 			 FROM books ORDER BY COALESCE(date_read, created_at::date) DESC, created_at DESC`)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Échec extraction"})
+			log.Printf("GET /books query error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		defer rows.Close()
@@ -411,6 +412,7 @@ func main() {
 			if err := rows.Scan(&b.ID, &b.Title, &b.Author, &b.ReadPages, &b.TotalPages,
 				&b.Status, &b.CoverURL, &b.Rating, &b.ReviewText,
 				&b.Genre, &b.SeriesName, &b.SeriesPosition, &b.DateRead); err != nil {
+				log.Printf("GET /books scan error: %v", err)
 				continue
 			}
 			books = append(books, b)
