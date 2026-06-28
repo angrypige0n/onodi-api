@@ -398,7 +398,7 @@ func main() {
 		rows, err := conn.Query(context.Background(),
 			`SELECT id, title, author, read_pages, total_pages, status, cover_url,
 			        rating, review_text, genre, series_name, series_position,
-			        TO_CHAR(date_read, 'YYYY-MM-DD') as date_read
+			        CAST(date_read AS TEXT) as date_read
 			 FROM books ORDER BY COALESCE(date_read, created_at::date) DESC, created_at DESC`)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Échec extraction"})
