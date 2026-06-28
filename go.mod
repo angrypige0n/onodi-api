@@ -1,6 +1,6 @@
 module onodi_api
 
-go 1.25.0
+go 1.25rc2
 
 require (
 	github.com/gin-gonic/gin v1.9.1
