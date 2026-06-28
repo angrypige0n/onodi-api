@@ -822,14 +822,24 @@ func main() {
 				readPages = pages
 			}
 
-			_, err := conn.Exec(context.Background(),
+			var bookID string
+			err := conn.QueryRow(context.Background(),
 				`INSERT INTO books (title, author, total_pages, read_pages, status, rating, review_text, date_read)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-				title, author, pages, readPages, status, ratingPtr, reviewPtr, dateReadPtr)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+				title, author, pages, readPages, status, ratingPtr, reviewPtr, dateReadPtr).Scan(&bookID)
 			if err != nil {
 				skipped++
 				continue
 			}
+
+			// Ajouter la review comme entrée de journal si elle existe et qu'on a une date
+			if review != "" && dateReadPtr != nil && bookID != "" {
+				conn.Exec(context.Background(),
+					`INSERT INTO reading_log (book_id, content, created_at)
+					 VALUES ($1, $2, $3::date)`,
+					bookID, review, *dateReadPtr)
+			}
+
 			imported++
 		}
 
