@@ -17,6 +17,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func getDBURL() string {
 	if url := os.Getenv("DATABASE_URL"); url != "" {
 		return url
@@ -1076,24 +1083,55 @@ func main() {
 		})
 	})
 
-	// POST /books/:id/cover — Upload couverture locale (base64)
+	// POST /books/:id/cover — Upload couverture via ImgBB
 	router.POST("/books/:id/cover", func(c *gin.Context) {
 		id := c.Param("id")
 		var body struct {
-			CoverURL string `json:"cover_url"`
+			ImageBase64 string `json:"image_base64"`
 		}
-		if err := c.ShouldBindJSON(&body); err != nil || body.CoverURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "cover_url requis"})
+		if err := c.ShouldBindJSON(&body); err != nil || body.ImageBase64 == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "image_base64 requis"})
 			return
 		}
-		_, err := conn.Exec(context.Background(),
-			`UPDATE books SET cover_url=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2`,
-			body.CoverURL, id)
+
+		// Upload vers ImgBB (clé API gratuite)
+		imgbbKey := "2b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b"
+		if envKey := os.Getenv("IMGBB_API_KEY"); envKey != "" {
+			imgbbKey = envKey
+		}
+
+		formData := url.Values{}
+		formData.Set("key", imgbbKey)
+		formData.Set("image", body.ImageBase64)
+
+		client := &http.Client{Timeout: 15 * time.Second}
+		resp, err := client.PostForm("https://api.imgbb.com/1/upload", formData)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur mise à jour"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur upload ImgBB"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"success": true})
+		defer resp.Body.Close()
+		respBody, _ := io.ReadAll(resp.Body)
+
+		var imgbbResp struct {
+			Success bool `json:"success"`
+			Data    struct {
+				URL string `json:"url"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(respBody, &imgbbResp); err != nil || !imgbbResp.Success {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Échec ImgBB: " + string(respBody[:min(100, len(respBody))])})
+			return
+		}
+
+		_, err = conn.Exec(context.Background(),
+			`UPDATE books SET cover_url=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2`,
+			imgbbResp.Data.URL, id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur DB"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "url": imgbbResp.Data.URL})
 	})
 
 	router.Run(":8080")
