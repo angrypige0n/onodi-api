@@ -651,11 +651,17 @@ func main() {
 			monthStats = append(monthStats, s)
 		}
 
-		// Genres all time
+		// Genres all time (exclut les non-genres)
 		genreRows, _ := conn.Query(context.Background(),
 			`SELECT TRIM(g) as genre, COUNT(*) as count
 			 FROM books, UNNEST(string_to_array(genre, ',')) AS g
-			 WHERE genre IS NOT NULL
+			 WHERE genre IS NOT NULL AND status = 'read'
+			   AND LOWER(TRIM(g)) NOT IN (
+			     'book_set', 'book set', 'fiction', 'nonfiction', 'non-fiction',
+			     'literature', 'novels', 'books', 'ebook', 'kindle', 'audiobook',
+			     'owned', 'default', 'read', 'to-read', 'currently-reading', ''
+			   )
+			   AND LENGTH(TRIM(g)) > 2
 			 GROUP BY TRIM(g) ORDER BY count DESC LIMIT 12`)
 		defer genreRows.Close()
 		var genreStats []GenreStat
@@ -669,8 +675,14 @@ func main() {
 		genreYearRows, _ := conn.Query(context.Background(),
 			`SELECT TRIM(g) as genre, COUNT(*) as count
 			 FROM books, UNNEST(string_to_array(genre, ',')) AS g
-			 WHERE genre IS NOT NULL
+			 WHERE genre IS NOT NULL AND status = 'read'
 			   AND DATE_TRUNC('year', date_read) = DATE_TRUNC('year', NOW())
+			   AND LOWER(TRIM(g)) NOT IN (
+			     'book_set', 'book set', 'fiction', 'nonfiction', 'non-fiction',
+			     'literature', 'novels', 'books', 'ebook', 'kindle', 'audiobook',
+			     'owned', 'default', 'read', 'to-read', 'currently-reading', ''
+			   )
+			   AND LENGTH(TRIM(g)) > 2
 			 GROUP BY TRIM(g) ORDER BY count DESC LIMIT 12`)
 		defer genreYearRows.Close()
 		var genreYearStats []GenreStat
