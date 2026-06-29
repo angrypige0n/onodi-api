@@ -651,7 +651,7 @@ func main() {
 			monthStats = append(monthStats, s)
 		}
 
-		// Genres — split comma-separated genres
+		// Genres all time
 		genreRows, _ := conn.Query(context.Background(),
 			`SELECT TRIM(g) as genre, COUNT(*) as count
 			 FROM books, UNNEST(string_to_array(genre, ',')) AS g
@@ -663,6 +663,21 @@ func main() {
 			var s GenreStat
 			genreRows.Scan(&s.Genre, &s.Count)
 			genreStats = append(genreStats, s)
+		}
+
+		// Genres cette année
+		genreYearRows, _ := conn.Query(context.Background(),
+			`SELECT TRIM(g) as genre, COUNT(*) as count
+			 FROM books, UNNEST(string_to_array(genre, ',')) AS g
+			 WHERE genre IS NOT NULL
+			   AND DATE_TRUNC('year', date_read) = DATE_TRUNC('year', NOW())
+			 GROUP BY TRIM(g) ORDER BY count DESC LIMIT 12`)
+		defer genreYearRows.Close()
+		var genreYearStats []GenreStat
+		for genreYearRows.Next() {
+			var s GenreStat
+			genreYearRows.Scan(&s.Genre, &s.Count)
+			genreYearStats = append(genreYearStats, s)
 		}
 
 		// Auteurs cette année
@@ -758,6 +773,7 @@ func main() {
 			"this_year_books":     thisYearBooks,
 			"books_by_month":      monthStats,
 			"books_by_genre":      genreStats,
+			"books_by_genre_year": genreYearStats,
 			"books_by_author":     authorStats,
 			"books_by_author_all": authorAllStats,
 			"activity_by_day":     dayStats,
@@ -1048,6 +1064,26 @@ func main() {
 			"enriched_covers": total - withoutCover,
 			"enriched_genres": total - withoutGenre,
 		})
+	})
+
+	// POST /books/:id/cover — Upload couverture locale (base64)
+	router.POST("/books/:id/cover", func(c *gin.Context) {
+		id := c.Param("id")
+		var body struct {
+			CoverURL string `json:"cover_url"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || body.CoverURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cover_url requis"})
+			return
+		}
+		_, err := conn.Exec(context.Background(),
+			`UPDATE books SET cover_url=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2`,
+			body.CoverURL, id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur mise à jour"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true})
 	})
 
 	router.Run(":8080")
