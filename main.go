@@ -705,9 +705,9 @@ func main() {
 			authorAllStats = append(authorAllStats, s)
 		}
 
-		// Activité par jour: notes de lecture + livres terminés
+		// Activité par jour: notes de lecture + livres terminés (5 ans)
 		dayRows, _ := conn.Query(context.Background(),
-			`SELECT day, COUNT(DISTINCT entry_id) as count,
+			`SELECT day::text, COUNT(DISTINCT entry_id) as count,
 			        ARRAY_AGG(DISTINCT title) as titles,
 			        ARRAY_REMOVE(ARRAY_AGG(DISTINCT cover_url), NULL) as covers
 			 FROM (
@@ -715,25 +715,23 @@ func main() {
 			          rl.id as entry_id, b.title, b.cover_url
 			   FROM reading_log rl
 			   JOIN books b ON b.id = rl.book_id
-			   WHERE rl.created_at >= NOW() - INTERVAL '365 days'
+			   WHERE rl.created_at >= NOW() - INTERVAL '5 years'
 			   UNION ALL
 			   SELECT b.date_read as day,
 			          b.id as entry_id, b.title, b.cover_url
 			   FROM books b
 			   WHERE b.date_read IS NOT NULL
-			     AND b.status = 'read'
-			     AND b.date_read >= CURRENT_DATE - INTERVAL '365 days'
+			     AND b.status IN ('read', 'dnf')
+			     AND b.date_read >= CURRENT_DATE - INTERVAL '5 years'
 			 ) combined
 			 GROUP BY day ORDER BY day`)
 		defer dayRows.Close()
 		var dayStats []DayStat
 		for dayRows.Next() {
 			var s DayStat
-			var day interface{}
 			var titles []string
 			var covers []string
-			dayRows.Scan(&day, &s.Count, &titles, &covers)
-			s.Date = fmt.Sprintf("%v", day)[:10]
+			dayRows.Scan(&s.Date, &s.Count, &titles, &covers)
 			if covers == nil {
 				covers = []string{}
 			}
