@@ -297,7 +297,7 @@ func fetchSeriesFromOpenLibrary(title, author string) ([]SeriesBook, error) {
 		}
 		var coverURL *string
 		if doc.CoverID != nil {
-			s := fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-M.jpg", *doc.CoverID)
+			s := fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-L.jpg", *doc.CoverID)
 			coverURL = &s
 		}
 		books = append(books, SeriesBook{
@@ -357,7 +357,7 @@ func main() {
 			}
 			var coverURL *string
 			if doc.CoverID != nil {
-				s := fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-M.jpg", *doc.CoverID)
+				s := fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-L.jpg", *doc.CoverID)
 				coverURL = &s
 			}
 			suggestions = append(suggestions, BookSuggestion{
@@ -972,7 +972,7 @@ func main() {
 					doc := olResp.Docs[0]
 					var coverURL *string
 					if doc.CoverID != nil {
-						s := fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-M.jpg", *doc.CoverID)
+						s := fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-L.jpg", *doc.CoverID)
 						coverURL = &s
 					}
 					genre := extractGenre(doc.Subject)
@@ -1041,7 +1041,7 @@ func main() {
 				doc := olResp.Docs[0]
 				var coverURL *string
 				if doc.CoverID != nil {
-					s := fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-M.jpg", *doc.CoverID)
+					s := fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-L.jpg", *doc.CoverID)
 					coverURL = &s
 				}
 				genre := extractGenre(doc.Subject)
