@@ -38,6 +38,7 @@ type Book struct {
 	SeriesName     *string `json:"series_name"`
 	SeriesPosition *int    `json:"series_position"`
 	DateRead       *string `json:"date_read"`
+	UpdatedAt      *string `json:"updated_at"`
 }
 
 type ProgressUpdate struct {
@@ -398,7 +399,8 @@ func main() {
 		rows, err := conn.Query(context.Background(),
 			`SELECT id, title, author, read_pages, total_pages, status, cover_url,
 			        rating, review_text, genre, series_name, series_position,
-			        CAST(date_read AS TEXT) as date_read
+			        CAST(date_read AS TEXT) as date_read,
+			        TO_CHAR(updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated_at
 			 FROM books ORDER BY COALESCE(date_read, created_at::date) DESC, created_at DESC`)
 		if err != nil {
 			log.Printf("GET /books query error: %v", err)
@@ -411,7 +413,7 @@ func main() {
 			var b Book
 			if err := rows.Scan(&b.ID, &b.Title, &b.Author, &b.ReadPages, &b.TotalPages,
 				&b.Status, &b.CoverURL, &b.Rating, &b.ReviewText,
-				&b.Genre, &b.SeriesName, &b.SeriesPosition, &b.DateRead); err != nil {
+				&b.Genre, &b.SeriesName, &b.SeriesPosition, &b.DateRead, &b.UpdatedAt); err != nil {
 				log.Printf("GET /books scan error: %v", err)
 				continue
 			}
@@ -590,11 +592,17 @@ func main() {
 		}
 
 		// Livres lus par mois (12 derniers mois) avec couvertures
+		type MonthBook struct {
+			Title    string  `json:"title"`
+			CoverURL *string `json:"cover_url"`
+			Rating   *int    `json:"rating"`
+		}
 		type MonthStatWithCovers struct {
-			Month     string   `json:"month"`
-			Count     int      `json:"count"`
-			Pages     int      `json:"pages"`
-			CoverURLs []string `json:"cover_urls"`
+			Month     string      `json:"month"`
+			Count     int         `json:"count"`
+			Pages     int         `json:"pages"`
+			CoverURLs []string    `json:"cover_urls"`
+			Books     []MonthBook `json:"books"`
 		}
 		monthRows, _ := conn.Query(context.Background(),
 			`WITH months AS (
@@ -604,7 +612,11 @@ func main() {
 			SELECT m.month,
 			       COALESCE(COUNT(b.id), 0) as count,
 			       COALESCE(SUM(b.total_pages), 0) as pages,
-			       ARRAY_REMOVE(ARRAY_AGG(b.cover_url ORDER BY b.date_read DESC), NULL) as covers
+			       ARRAY_REMOVE(ARRAY_AGG(b.cover_url ORDER BY b.date_read DESC), NULL) as covers,
+			       COALESCE(JSON_AGG(
+			         JSON_BUILD_OBJECT('title', b.title, 'cover_url', b.cover_url, 'rating', b.rating)
+			         ORDER BY b.date_read DESC
+			       ) FILTER (WHERE b.id IS NOT NULL), '[]') as books_json
 			FROM months m
 			LEFT JOIN books b ON TO_CHAR(b.date_read, 'YYYY-MM') = m.month AND b.status='read'
 			GROUP BY m.month ORDER BY m.month ASC`)
@@ -613,18 +625,38 @@ func main() {
 		for monthRows.Next() {
 			var s MonthStatWithCovers
 			var covers []string
-			monthRows.Scan(&s.Month, &s.Count, &s.Pages, &covers)
+			var booksJSON string
+			monthRows.Scan(&s.Month, &s.Count, &s.Pages, &covers, &booksJSON)
 			if covers == nil {
 				covers = []string{}
 			}
 			s.CoverURLs = covers
+			// Parse books JSON
+			var booksRaw []map[string]interface{}
+			json.Unmarshal([]byte(booksJSON), &booksRaw)
+			for _, br := range booksRaw {
+				mb := MonthBook{}
+				if t, ok := br["title"].(string); ok {
+					mb.Title = t
+				}
+				if c, ok := br["cover_url"].(string); ok && c != "" {
+					mb.CoverURL = &c
+				}
+				if r, ok := br["rating"].(float64); ok {
+					ri := int(r)
+					mb.Rating = &ri
+				}
+				s.Books = append(s.Books, mb)
+			}
 			monthStats = append(monthStats, s)
 		}
 
-		// Genres
+		// Genres — split comma-separated genres
 		genreRows, _ := conn.Query(context.Background(),
-			`SELECT genre, COUNT(*) as count FROM books
-			 WHERE genre IS NOT NULL GROUP BY genre ORDER BY count DESC`)
+			`SELECT TRIM(g) as genre, COUNT(*) as count
+			 FROM books, UNNEST(string_to_array(genre, ',')) AS g
+			 WHERE genre IS NOT NULL
+			 GROUP BY TRIM(g) ORDER BY count DESC LIMIT 12`)
 		defer genreRows.Close()
 		var genreStats []GenreStat
 		for genreRows.Next() {
@@ -633,10 +665,11 @@ func main() {
 			genreStats = append(genreStats, s)
 		}
 
-		// Auteurs
+		// Auteurs cette année
 		authorRows, _ := conn.Query(context.Background(),
 			`SELECT author, COUNT(*) as count FROM books
-			 WHERE status='read' GROUP BY author ORDER BY count DESC LIMIT 10`)
+			 WHERE status='read' AND DATE_TRUNC('year', date_read) = DATE_TRUNC('year', NOW())
+			 GROUP BY author ORDER BY count DESC LIMIT 10`)
 		defer authorRows.Close()
 		var authorStats []AuthorStat
 		for authorRows.Next() {
@@ -645,14 +678,37 @@ func main() {
 			authorStats = append(authorStats, s)
 		}
 
-		// Activité par jour avec livres associés
+		// Auteurs all time
+		authorAllRows, _ := conn.Query(context.Background(),
+			`SELECT author, COUNT(*) as count FROM books
+			 WHERE status='read' GROUP BY author ORDER BY count DESC LIMIT 10`)
+		defer authorAllRows.Close()
+		var authorAllStats []AuthorStat
+		for authorAllRows.Next() {
+			var s AuthorStat
+			authorAllRows.Scan(&s.Author, &s.Count)
+			authorAllStats = append(authorAllStats, s)
+		}
+
+		// Activité par jour: notes de lecture + livres terminés
 		dayRows, _ := conn.Query(context.Background(),
-			`SELECT DATE(rl.created_at) as day, COUNT(DISTINCT rl.id) as count,
-			        ARRAY_AGG(DISTINCT b.title) as titles,
-			        ARRAY_REMOVE(ARRAY_AGG(DISTINCT b.cover_url), NULL) as covers
-			 FROM reading_log rl
-			 JOIN books b ON b.id = rl.book_id
-			 WHERE rl.created_at >= NOW() - INTERVAL '365 days'
+			`SELECT day, COUNT(DISTINCT entry_id) as count,
+			        ARRAY_AGG(DISTINCT title) as titles,
+			        ARRAY_REMOVE(ARRAY_AGG(DISTINCT cover_url), NULL) as covers
+			 FROM (
+			   SELECT DATE(rl.created_at AT TIME ZONE 'UTC') as day,
+			          rl.id as entry_id, b.title, b.cover_url
+			   FROM reading_log rl
+			   JOIN books b ON b.id = rl.book_id
+			   WHERE rl.created_at >= NOW() - INTERVAL '365 days'
+			   UNION ALL
+			   SELECT b.date_read as day,
+			          b.id as entry_id, b.title, b.cover_url
+			   FROM books b
+			   WHERE b.date_read IS NOT NULL
+			     AND b.status = 'read'
+			     AND b.date_read >= CURRENT_DATE - INTERVAL '365 days'
+			 ) combined
 			 GROUP BY day ORDER BY day`)
 		defer dayRows.Close()
 		var dayStats []DayStat
@@ -695,15 +751,16 @@ func main() {
 			Scan(&thisYearBooks)
 
 		c.JSON(http.StatusOK, gin.H{
-			"total_read":       totalRead,
-			"total_pages":      totalPages,
-			"this_month_books": thisMonthBooks,
-			"this_month_pages": thisMonthPages,
-			"this_year_books":  thisYearBooks,
-			"books_by_month":   monthStats,
-			"books_by_genre":   genreStats,
-			"books_by_author":  authorStats,
-			"activity_by_day":  dayStats,
+			"total_read":          totalRead,
+			"total_pages":         totalPages,
+			"this_month_books":    thisMonthBooks,
+			"this_month_pages":    thisMonthPages,
+			"this_year_books":     thisYearBooks,
+			"books_by_month":      monthStats,
+			"books_by_genre":      genreStats,
+			"books_by_author":     authorStats,
+			"books_by_author_all": authorAllStats,
+			"activity_by_day":     dayStats,
 		})
 	})
 
